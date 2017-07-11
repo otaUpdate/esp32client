@@ -23,12 +23,21 @@
 
 
 // ******** global macro definitions ********
+#ifndef OTA_UPDATECLIENT_MAXNUM_CBS
+	#define OTA_UPDATECLIENT_MAXNUM_CBS			2
+#endif
 
 
 // ******** global type definitions *********
+typedef void (*ota_updateClient_updateAvailableCb_t)(const char *const updateUuidIn, void *const userVarIn);
+typedef void (*ota_updateClient_willUpdateCb_t)(void *const userVarIn);
 
 
 // ******** global function prototypes ********
 bool ota_updateClient_init(const char *const fwUuidIn, const char *const hwUuidIn, const char *const devSerialNumIn);
+
+bool ota_updateClient_addListener(ota_updateClient_updateAvailableCb_t cb_updateAvailableIn,
+								  ota_updateClient_willUpdateCb_t cb_willUpdateIn,
+								  void* userVarIn);
 
 #endif

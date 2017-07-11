@@ -33,22 +33,33 @@
 
 #define OTA_POLL_PERIOD_MS					10 * 1000
 
-#define SERIALNUM_MAXLEN_BYTES				37
+#define UUID_LEN_BYTES						36
+#define SERIALNUM_MAXLEN_BYTES				UUID_LEN_BYTES+1
 
 #define TAG									"ota_updateClient"
 
 
 // ******** local type definitions ********
+typedef struct
+{
+	ota_updateClient_updateAvailableCb_t cb_updateAvailable;
+	ota_updateClient_willUpdateCb_t cb_willUpdate;
+	void* userVar;
+}listenerEntry_t;
 
 
 // ******** local function prototypes ********
 static void mainThread(void);
+static bool isUpdateAvailable(char* updateUuidOut);
 
 
 // ********  local variable declarations *********
-static char fwUuid[37];
-static char hwUuid[37];
+static char fwUuid[UUID_LEN_BYTES+1];
+static char hwUuid[UUID_LEN_BYTES+1];
 static char devSerialNum[SERIALNUM_MAXLEN_BYTES];
+
+static listenerEntry_t listeners[OTA_UPDATECLIENT_MAXNUM_CBS];
+static size_t numListeners = 0;
 
 
 // ******** global function implementations ********
@@ -72,6 +83,21 @@ bool ota_updateClient_init(const char *const fwUuidIn, const char *const hwUuidI
 }
 
 
+bool ota_updateClient_addListener(ota_updateClient_updateAvailableCb_t cb_updateAvailableIn,
+								  ota_updateClient_willUpdateCb_t cb_willUpdateIn,
+								  void* userVarIn)
+{
+	if( numListeners >= (sizeof(listeners)/sizeof(*listeners)) ) return false;
+
+	listeners[numListeners].cb_updateAvailable = cb_updateAvailableIn;
+	listeners[numListeners].cb_willUpdate = cb_willUpdateIn;
+	listeners[numListeners].userVar = userVarIn;
+	numListeners++;
+
+	return true;
+}
+
+
 // ******** local function implementations ********
 static void mainThread(void)
 {
@@ -85,37 +111,56 @@ static void mainThread(void)
 		ota_thread_delay_ms(OTA_POLL_PERIOD_MS);
 		OTA_LOG_INFO(TAG, "checking for updates now");
 
-		// create our check-in request body...
-		char body[57];
-		snprintf(body, sizeof(body), "{\"currFwUuid\":\"%s\"}", fwUuid);
-		body[sizeof(body)-1] = 0;
-
-		// send out check-in request
-		uint16_t httpStatus;
-		char responseBody[37];
-		if( !ota_httpClient_postJson("/v1/checkforupdate", body, &httpStatus, responseBody, sizeof(responseBody)) )
+		char targetUuid[UUID_LEN_BYTES+1];
+		if( isUpdateAvailable(targetUuid) )
 		{
-			OTA_LOG_WARN(TAG, "update check failed...will retry");
-			continue;
+			OTA_LOG_INFO(TAG, "new FW available: '%s' beginning download", targetUuid);
 		}
-
-		// if we made it here, we got a valid HTTP response...verify it
-		if( httpStatus != 200 )
-		{
-			OTA_LOG_WARN(TAG, "HTTP request did not return 200(OK)...will retry");
-			continue;
-		}
-
-		// if we made it here, update check was successful, see if we have an update
-		if( strlen(responseBody) == 36 )
-		{
-			// got a new target fw UUID
-			OTA_LOG_INFO(TAG, "new FW available: '%s'", responseBody);
-			continue;
-		}
-		else
-		{
-			OTA_LOG_INFO(TAG, "FW up-to-date");
-		}
+		else OTA_LOG_INFO(TAG, "FW up-to-date");
 	}
+}
+
+
+static bool isUpdateAvailable(char* updateUuidOut)
+{
+	if( updateUuidOut == NULL ) return false;
+
+	// create our check-in request body...
+	char body[57];
+	snprintf(body, sizeof(body), "{\"currFwUuid\":\"%s\"}", fwUuid);
+	body[sizeof(body)-1] = 0;
+
+	// send our check request
+	uint16_t httpStatus;
+	char responseBody[UUID_LEN_BYTES+1];
+	if( !ota_httpClient_postJson("/v1/checkforupdate", body, &httpStatus, responseBody, sizeof(responseBody)) )
+	{
+		OTA_LOG_WARN(TAG, "update check failed...will retry");
+		return false;
+	}
+
+	// if we made it here, we got a valid HTTP response...verify it
+	if( httpStatus != 200 )
+	{
+		OTA_LOG_WARN(TAG, "HTTP request did not return 200(OK)...will retry");
+		return false;
+	}
+
+	// if we made it here, update check was successful, see if we have an update
+	if( strlen(responseBody) == UUID_LEN_BYTES )
+	{
+		// got a new target fw UUID...notify our listeners
+		for( size_t i = 0; i < numListeners; i++ )
+		{
+			if( listeners[i].cb_updateAvailable != NULL ) listeners[i].cb_updateAvailable(responseBody, listeners[i].userVar);
+		}
+
+		// copy out for further processing
+		strncpy(updateUuidOut, responseBody, UUID_LEN_BYTES);
+
+		return true;
+	}
+
+	// if we made it here, no FW update
+	return false;
 }
