@@ -19,13 +19,48 @@
 
 
 // ******** includes ********
+#include "ota_updateClient.h"
+#include "sdkconfig.h"
 
 
 // ******** global macro definitions ********
-#define OTA_LOG_ERROR(tagIn, fmtIn, ...)		printf("E %s " fmtIn "\r\n", tagIn, ##__VA_ARGS__); fflush(stdout);
-#define OTA_LOG_WARN(tagIn, fmtIn, ...)			printf("W %s " fmtIn "\r\n", tagIn, ##__VA_ARGS__); fflush(stdout);
-#define OTA_LOG_INFO(tagIn, fmtIn, ...)			printf("I %s " fmtIn "\r\n", tagIn, ##__VA_ARGS__); fflush(stdout);
-#define OTA_LOG_DEBUG(tagIn, fmtIn, ...)		printf("D %s " fmtIn "\r\n", tagIn, ##__VA_ARGS__); fflush(stdout);
+#define OTA_LOG_LEVEL_NONE			0
+#define OTA_LOG_LEVEL_ERROR			1
+#define OTA_LOG_LEVEL_WARN			2
+#define OTA_LOG_LEVEL_INFO			3
+#define OTA_LOG_LEVEL_DEBUG			4
+
+#ifdef CONFIG_OTA_LOG_LEVEL
+#define OTA_LOG_LEVEL				CONFIG_OTA_LOG_LEVEL
+#endif
+
+#if( (!defined OTA_LOG_LEVEL) || (OTA_LOG_LEVEL == OTA_LOG_LEVEL_NONE) )
+#define OTA_LOG_ERROR(tagIn, fmtIn, ...)
+#define OTA_LOG_WARN(tagIn, fmtIn, ...)
+#define OTA_LOG_INFO(tagIn, fmtIn, ...)
+#define OTA_LOG_DEBUG(tagIn, fmtIn, ...)
+#elif( (defined OTA_LOG_LEVEL) && (OTA_LOG_LEVEL == OTA_LOG_LEVEL_ERROR) )
+#define OTA_LOG_ERROR(tagIn, fmtIn, ...)		ota_updateClient_log(OTA_LOG_LEVEL_ERROR, tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_WARN(tagIn, fmtIn, ...)
+#define OTA_LOG_INFO(tagIn, fmtIn, ...)
+#define OTA_LOG_DEBUG(tagIn, fmtIn, ...)
+#elif( (defined OTA_LOG_LEVEL) && (OTA_LOG_LEVEL == OTA_LOG_LEVEL_WARN) )
+#define OTA_LOG_ERROR(tagIn, fmtIn, ...)		ota_updateClient_log(OTA_LOG_LEVEL_ERROR, tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_WARN(tagIn, fmtIn, ...)			ota_updateClient_log(OTA_LOG_LEVEL_WARN,  tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_INFO(tagIn, fmtIn, ...)
+#define OTA_LOG_DEBUG(tagIn, fmtIn, ...)
+#elif( (defined OTA_LOG_LEVEL) && (OTA_LOG_LEVEL == OTA_LOG_LEVEL_INFO) )
+#define OTA_LOG_ERROR(tagIn, fmtIn, ...)		ota_updateClient_log(OTA_LOG_LEVEL_ERROR, tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_WARN(tagIn, fmtIn, ...)			ota_updateClient_log(OTA_LOG_LEVEL_WARN,  tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_INFO(tagIn, fmtIn, ...)			ota_updateClient_log(OTA_LOG_LEVEL_INFO,  tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_DEBUG(tagIn, fmtIn, ...)
+#elif( (defined OTA_LOG_LEVEL) && (OTA_LOG_LEVEL == OTA_LOG_LEVEL_DEBUG) )
+#define OTA_LOG_ERROR(tagIn, fmtIn, ...)		ota_updateClient_log(OTA_LOG_LEVEL_ERROR, tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_WARN(tagIn, fmtIn, ...)			ota_updateClient_log(OTA_LOG_LEVEL_WARN,  tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_INFO(tagIn, fmtIn, ...)			ota_updateClient_log(OTA_LOG_LEVEL_INFO,  tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#define OTA_LOG_DEBUG(tagIn, fmtIn, ...)		ota_updateClient_log(OTA_LOG_LEVEL_DEBUG, tagIn, tagIn " " fmtIn, ##__VA_ARGS__)
+#endif
+
 
 
 // ******** global type definitions *********

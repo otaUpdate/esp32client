@@ -17,6 +17,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/portmacro.h"
 
 
 // ******** local macro definitions ********
@@ -41,6 +42,7 @@ void ota_thread_startThreadWithCallback(ota_thread_cb_t cbIn)
 
 void ota_thread_delay_ms(uint32_t delay_msIn)
 {
+	taskYIELD();
 	vTaskDelay(delay_msIn / portTICK_PERIOD_MS);
 }
 

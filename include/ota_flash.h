@@ -14,13 +14,12 @@
  *
  * @author Christopher Armenio
  */
-#ifndef OTA_HTTPCLIENT_H_
-#define OTA_HTTPCLIENT_H_
+#ifndef OTA_FLASH_H_
+#define OTA_FLASH_H_
 
 
 // ******** includes ********
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdlib.h>
 
 
@@ -30,14 +29,14 @@
 // ******** global type definitions *********
 
 
-// ******** global function prototypes ********
-bool ota_httpClient_init(const char *const hostnameIn, const uint16_t portNumIn, const unsigned char *rootCaCertIn, size_t rootCaCertSize_bytesIn);
+// ******** global function prototypes *******
+void ota_flash_printPartitionInfo(void);
 
-bool ota_httpClient_postJson(const char *const urlIn, const char *const bodyIn,
-							 uint16_t *const statusOut, char *const bodyOut,
-							 const size_t bodyOutMaxSize_bytesIn, size_t *const bodySize_bytesOut,
-							 bool keepOpenIn);
+bool ota_flash_otaSave_begin(size_t *const requestedBlockSize_bytesOut);
+bool ota_flash_otaSave_writeBlock(const void* dataIn, size_t numBytesIn);
+bool ota_flash_otaSave_endAndValidate(void);
+void ota_flash_otaSave_abort(void);
 
-void ota_httpClient_closeConnection(void);
+void ota_flash_reboot(void);
 
 #endif

@@ -20,6 +20,7 @@
 
 // ******** includes ********
 #include <stdbool.h>
+#include <stdarg.h>
 
 
 // ******** global macro definitions ********
@@ -29,6 +30,7 @@
 
 
 // ******** global type definitions *********
+typedef void (*ota_updateClient_loggingFunction_t)(void *userVarIn, int otaLogLevelIn, const char *const tagIn, const char *const fmtIn, va_list argsIn);
 typedef void (*ota_updateClient_updateAvailableCb_t)(const char *const updateUuidIn, void *const userVarIn);
 typedef void (*ota_updateClient_willUpdateCb_t)(void *const userVarIn);
 
@@ -36,8 +38,16 @@ typedef void (*ota_updateClient_willUpdateCb_t)(void *const userVarIn);
 // ******** global function prototypes ********
 bool ota_updateClient_init(const char *const fwUuidIn, const char *const hwUuidIn, const char *const devSerialNumIn);
 
+void ota_updateClient_setLogFunction(ota_updateClient_loggingFunction_t loggingFunctionIn, void *userVarIn);
+
 bool ota_updateClient_addListener(ota_updateClient_updateAvailableCb_t cb_updateAvailableIn,
 								  ota_updateClient_willUpdateCb_t cb_willUpdateIn,
 								  void* userVarIn);
+
+/**
+ * @protected
+ */
+void ota_updateClient_log(int otaLogLevelIn, const char *const tagIn, const char *const fmtIn, ...);
+
 
 #endif

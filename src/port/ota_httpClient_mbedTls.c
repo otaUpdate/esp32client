@@ -44,7 +44,7 @@
 
 
 // ******** local function prototypes ********
-static void closeConnection(void);
+static bool openConnection(void);
 static bool writeString(const char *const stringIn);
 static bool writeLine(const char *const lineIn);
 static bool writeFormattedLine(const char* formatIn, ...);
@@ -57,6 +57,7 @@ static bool readBody(size_t contentLengthIn, char* bodyOut);
 
 // ********  local variable declarations *********
 static bool isInit = false;
+static bool isOpen = false;
 
 static char* hostname;
 static uint16_t portNum;
@@ -127,7 +128,7 @@ bool ota_httpClient_init(const char *const hostnameIn, const uint16_t portNumIn,
 	mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
 
 
-	mbedtls_esp_enable_debug_log(&conf, 4);
+//	mbedtls_esp_enable_debug_log(&conf, 4);
 
 
 	OTA_LOG_DEBUG(TAG, "configuring TLS");
@@ -145,13 +146,99 @@ bool ota_httpClient_init(const char *const hostnameIn, const uint16_t portNumIn,
 
 
 bool ota_httpClient_postJson(const char *const urlIn, const char *const bodyIn,
-							 uint16_t *const statusOut, char *const bodyOut, const size_t bodyOutMaxSize_bytesIn)
+							 uint16_t *const statusOut, char *const bodyOut,
+							 const size_t bodyOutMaxSize_bytesIn, size_t *const bodySize_bytesOut,
+							 bool keepOpenIn)
 {
 	if( !isInit )
 	{
 		OTA_LOG_ERROR(TAG, "not initialized");
 		return false;
 	}
+
+	if( !isOpen && !openConnection() )
+	{
+		OTA_LOG_ERROR(TAG, "error opening connection");
+		return false;
+	}
+
+	OTA_LOG_DEBUG(TAG, "writing headers");
+	if( !writeFormattedLine("POST %s HTTP/1.1", urlIn) ||
+		!writeFormattedLine("Host: %s", hostname) ||
+		!writeLine("Content-Type: application/json") ||
+		!writeFormattedLine("Content-Length: %d", strlen(bodyIn)) ||
+		!writeString("\r\n") )
+	{
+		OTA_LOG_ERROR(TAG, "failed to write headers");
+		ota_httpClient_closeConnection();
+		return false;
+	}
+
+	OTA_LOG_DEBUG(TAG, "writing body");
+	if( !writeString(bodyIn) )
+	{
+		OTA_LOG_ERROR(TAG, "failed to write body");
+		ota_httpClient_closeConnection();
+		return false;
+	}
+
+
+	OTA_LOG_DEBUG(TAG, "reading response");
+
+	uint16_t statusCode;
+	if( !parseStatusCode(&statusCode) )
+	{
+		OTA_LOG_ERROR(TAG, "failed to read status code");
+		ota_httpClient_closeConnection();
+		return false;
+	}
+	OTA_LOG_DEBUG(TAG, "statusCode: %d", statusCode);
+
+	size_t contentLength_bytes;
+	if( !parseContentLength(&contentLength_bytes) )
+	{
+		OTA_LOG_ERROR(TAG, "failed to read content length");
+		ota_httpClient_closeConnection();
+		return false;
+	}
+	OTA_LOG_DEBUG(TAG, "contentLength: %d", contentLength_bytes);
+	if( bodySize_bytesOut != NULL ) *bodySize_bytesOut = contentLength_bytes;
+
+	if( !forwardToStartOfBody() ||
+		((contentLength_bytes+1) > bodyOutMaxSize_bytesIn) ||
+		!readBody(contentLength_bytes, bodyOut) )
+	{
+		OTA_LOG_ERROR(TAG, "problem reading body");
+		ota_httpClient_closeConnection();
+		return false;
+	}
+
+	OTA_LOG_DEBUG(TAG, "done reading response");
+	if( !keepOpenIn ) ota_httpClient_closeConnection();
+
+	// if we made it here we were successful...save our status code and return
+	if( statusOut != NULL ) *statusOut = statusCode;
+	return true;
+}
+
+
+void ota_httpClient_closeConnection(void)
+{
+	if( !isOpen ) return;
+
+	OTA_LOG_DEBUG(TAG, "closing connection");
+	mbedtls_ssl_close_notify(&ssl);
+	mbedtls_ssl_session_reset(&ssl);
+	mbedtls_net_free(&server_fd);
+
+	isOpen = false;
+}
+
+
+// ******** local function implementations ********
+static bool openConnection(void)
+{
+	if( isOpen ) return true;
 
 	// setup our network connection
 	mbedtls_net_init(&server_fd);
@@ -161,7 +248,7 @@ bool ota_httpClient_postJson(const char *const urlIn, const char *const bodyIn,
 	snprintf(portNum_str, sizeof(portNum_str), "%d", portNum);
 	portNum_str[sizeof(portNum_str)-1] = 0;
 
-	OTA_LOG_INFO(TAG, "connecting to %s:%s...", hostname, portNum_str);
+	OTA_LOG_DEBUG(TAG, "connecting to %s:%s...", hostname, portNum_str);
 	int tmpRet;
 	if( (tmpRet = mbedtls_net_connect(&server_fd, hostname, portNum_str, MBEDTLS_NET_PROTO_TCP)) != 0 )
 	{
@@ -179,7 +266,7 @@ bool ota_httpClient_postJson(const char *const urlIn, const char *const bodyIn,
 		if( (tmpRet != MBEDTLS_ERR_SSL_WANT_READ) && (tmpRet != MBEDTLS_ERR_SSL_WANT_WRITE) )
 		{
 			OTA_LOG_ERROR(TAG, "mbedtls_ssl_handshake returned %s0x%x", tmpRet<0?"-":"", tmpRet<0?-(unsigned)tmpRet:tmpRet);
-			closeConnection();
+			ota_httpClient_closeConnection();
 			return false;
 		}
 	}
@@ -190,76 +277,12 @@ bool ota_httpClient_postJson(const char *const urlIn, const char *const bodyIn,
 	if( (flags = mbedtls_ssl_get_verify_result(&ssl)) != 0 )
 	{
 		OTA_LOG_ERROR(TAG, "failed to verify peer certificate");
-		closeConnection();
+		ota_httpClient_closeConnection();
 		return false;
 	}
 
-
-	OTA_LOG_DEBUG(TAG, "writing headers");
-	if( !writeFormattedLine("POST %s HTTP/1.1", urlIn) ||
-		!writeFormattedLine("Host: %s", hostname) ||
-		!writeLine("Content-Type: application/json") ||
-		!writeFormattedLine("Content-Length: %d", strlen(bodyIn)) ||
-		!writeString("\r\n") )
-	{
-		OTA_LOG_ERROR(TAG, "failed to write headers");
-		closeConnection();
-		return false;
-	}
-
-	OTA_LOG_DEBUG(TAG, "writing body");
-	if( !writeString(bodyIn) )
-	{
-		OTA_LOG_ERROR(TAG, "failed to write body");
-		closeConnection();
-		return false;
-	}
-
-
-	OTA_LOG_DEBUG(TAG, "reading response");
-
-	uint16_t statusCode;
-	if( !parseStatusCode(&statusCode) )
-	{
-		OTA_LOG_ERROR(TAG, "failed to read status code");
-		closeConnection();
-		return false;
-	}
-	OTA_LOG_DEBUG(TAG, "statusCode: %d", statusCode);
-
-	size_t contentLength_bytes;
-	if( !parseContentLength(&contentLength_bytes) )
-	{
-		OTA_LOG_ERROR(TAG, "failed to read content length");
-		closeConnection();
-		return false;
-	}
-	OTA_LOG_DEBUG(TAG, "contentLength: %d", contentLength_bytes);
-
-	if( !forwardToStartOfBody() ||
-		((contentLength_bytes+1) > bodyOutMaxSize_bytesIn) ||
-		!readBody(contentLength_bytes, bodyOut) )
-	{
-		OTA_LOG_ERROR(TAG, "problem reading body");
-		closeConnection();
-		return false;
-	}
-
-	OTA_LOG_DEBUG(TAG, "done reading response");
-	closeConnection();
-
-	// if we made it here we were successful...save our status code and return
-	if( statusOut != NULL ) *statusOut = statusCode;
+	isOpen = true;
 	return true;
-}
-
-
-// ******** local function implementations ********
-static void closeConnection(void)
-{
-	mbedtls_ssl_close_notify(&ssl);
-	mbedtls_ssl_session_reset(&ssl);
-	mbedtls_net_free(&server_fd);
 }
 
 
@@ -465,8 +488,13 @@ static bool readBody(size_t contentLengthIn, char* bodyOut)
 	int tmpRet;
 	for( size_t i = 0; i < contentLengthIn; i++ )
 	{
-		tmpRet = mbedtls_ssl_read(&ssl, (uint8_t*)&bodyOut[i++], 1);
-		if( (tmpRet == MBEDTLS_ERR_SSL_WANT_READ) || (tmpRet == MBEDTLS_ERR_SSL_WANT_WRITE) ) continue;
+		tmpRet = mbedtls_ssl_read(&ssl, (uint8_t*)&bodyOut[i], 1);
+		if( (tmpRet == MBEDTLS_ERR_SSL_WANT_READ) || (tmpRet == MBEDTLS_ERR_SSL_WANT_WRITE) )
+		{
+			// no data available yet...try again (don't move on to next byte yet)
+			i--;
+			continue;
+		}
 
 		// check for errors
 		if( tmpRet < 0 )
