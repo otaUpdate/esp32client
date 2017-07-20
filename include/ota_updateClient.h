@@ -36,7 +36,7 @@ typedef void (*ota_updateClient_willUpdateCb_t)(void *const userVarIn);
 
 
 // ******** global function prototypes ********
-bool ota_updateClient_init(const char *const fwUuidIn, const char *const hwUuidIn, const char *const devSerialNumIn);
+bool ota_updateClient_init(const char *const fwUuidIn, const char *const devSerialNumIn);
 
 void ota_updateClient_setLogFunction(ota_updateClient_loggingFunction_t loggingFunctionIn, void *userVarIn);
 

@@ -37,7 +37,7 @@
 #define INTERBLOCK_DELAY_MS					0
 
 #define UUID_LEN_BYTES						36
-#define SERIALNUM_MAXLEN_BYTES				UUID_LEN_BYTES+1
+#define SERIALNUM_MAXLEN_BYTES				48
 #define FWSIZESTR_MAXLEN_BYTES				9
 
 #define FW_DL_MAX_FAILED_TRIES				8
@@ -64,8 +64,7 @@ static void downloadUpdateWithUuid(char *targetUuidIn, size_t fwSize_bytesIn);
 
 // ********  local variable declarations *********
 static char fwUuid[UUID_LEN_BYTES+1];
-static char hwUuid[UUID_LEN_BYTES+1];
-static char devSerialNum[SERIALNUM_MAXLEN_BYTES];
+static char devSerialNum[SERIALNUM_MAXLEN_BYTES+1];
 
 static listenerEntry_t listeners[OTA_UPDATECLIENT_MAXNUM_CBS];
 static size_t numListeners = 0;
@@ -75,16 +74,14 @@ static void* logFunction_userVar = NULL;
 
 
 // ******** global function implementations ********
-bool ota_updateClient_init(const char *const fwUuidIn, const char *const hwUuidIn, const char *const devSerialNumIn)
+bool ota_updateClient_init(const char *const fwUuidIn, const char *const devSerialNumIn)
 {
 	// ensure we have our needed parameters
 	if( fwUuidIn == NULL ) return false;
-	if( hwUuidIn == NULL ) return false;
 	if( devSerialNumIn == NULL ) return false;
 
 	// store them locally
 	if( !ota_copyStringToBufferSafely(fwUuidIn, fwUuid, sizeof(fwUuid)) ) return false;
-	if( !ota_copyStringToBufferSafely(hwUuidIn, hwUuid, sizeof(hwUuid)) ) return false;
 	if( !ota_copyStringToBufferSafely(devSerialNumIn, devSerialNum, sizeof(devSerialNum)) ) return false;
 
 	// schedule our thread
@@ -166,8 +163,8 @@ static bool isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut
 	if( (updateUuidOut == NULL) || (fwSize_bytesOut == NULL) ) return false;
 
 	// create our check-in request body...
-	char body[57];
-	snprintf(body, sizeof(body), "{\"currFwUuid\":\"%s\"}", fwUuid);
+	char body[117];
+	snprintf(body, sizeof(body), "{\"currFwUuid\":\"%s\",\"serialNum\":\"%s\"}", fwUuid, devSerialNum);
 	body[sizeof(body)-1] = 0;
 
 	// send our check request
