@@ -29,8 +29,9 @@
 
 
 // ******** local macro definitions ********
-#define OTA_HOSTNAME						"devs.otaupdate.net"
+#define OTA_HOSTNAME							"api.otaupdate.net"
 #define OTA_PORTNUM							443
+#define OTA_VERSION							"v1"
 
 #define OTA_POLL_STARTUP_DELAY_MS			5 * 1000
 #define OTA_POLL_PERIOD_MS					10 * 1000
@@ -44,7 +45,7 @@
 
 #define TAG									"ota_updateClient"
 
-#define DIV_ROUND_UP(num, denom)			(((num) + ((denom) - 1)) / (denom))
+#define DIV_ROUND_UP(num, denom)				(((num) + ((denom) - 1)) / (denom))
 
 
 // ******** local type definitions ********
@@ -163,15 +164,15 @@ static bool isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut
 	if( (updateUuidOut == NULL) || (fwSize_bytesOut == NULL) ) return false;
 
 	// create our check-in request body...
-	char body[117];
-	snprintf(body, sizeof(body), "{\"currFwUuid\":\"%s\",\"serialNum\":\"%s\"}", fwUuid, devSerialNum);
+	char body[128];
+	snprintf(body, sizeof(body), "{\"currFwUuid\":\"%s\",\"procSerialNum\":\"%s\"}", fwUuid, devSerialNum);
 	body[sizeof(body)-1] = 0;
 
 	// send our check request
 	uint16_t httpStatus;
 	size_t responseLen_bytes;
 	char responseBody[UUID_LEN_BYTES+1+FWSIZESTR_MAXLEN_BYTES+1];		// +1 for separating space, +1 for null-term
-	if( !ota_httpClient_postJson("/v1/checkforupdate", body, &httpStatus, responseBody, sizeof(responseBody), &responseLen_bytes, false) )
+	if( !ota_httpClient_postJson("/" OTA_VERSION "/devs/checkforupdate", body, &httpStatus, responseBody, sizeof(responseBody), &responseLen_bytes, false) )
 	{
 		OTA_LOG_WARN(TAG, "update check failed, will retry");
 		return false;
@@ -180,7 +181,7 @@ static bool isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut
 	// if we made it here, we got a valid HTTP response...verify it
 	if( httpStatus != 200 )
 	{
-		OTA_LOG_WARN(TAG, "HTTP request did not return 200(OK), will retry");
+		OTA_LOG_WARN(TAG, "HTTP request did not return 200(OK) [%d], will retry", httpStatus);
 		return false;
 	}
 
@@ -251,7 +252,7 @@ static void downloadUpdateWithUuid(char *targetUuidIn, size_t fwSize_bytesIn)
 
 		// issue our request
 		size_t numBytesInCurrBlock;
-		if( ota_httpClient_postJson("/v1/getfwdata", body, &httpStatus, response, sizeof(response), &numBytesInCurrBlock, true) )
+		if( ota_httpClient_postJson("/" OTA_VERSION "/devs/getfwdata", body, &httpStatus, response, sizeof(response), &numBytesInCurrBlock, true) )
 		{
 			// if we made it here, we got a valid HTTP response...verify it
 			if( httpStatus == 200 )
