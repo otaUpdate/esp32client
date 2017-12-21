@@ -185,7 +185,7 @@ bool ota_httpClient_postJson(const char *const urlIn, const char *const bodyIn,
 
 	OTA_LOG_DEBUG(TAG, "reading response");
 
-	uint16_t statusCode;
+	uint16_t statusCode = 0;
 	if( !parseStatusCode(&statusCode) )
 	{
 		OTA_LOG_ERROR(TAG, "failed to read status code");

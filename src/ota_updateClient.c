@@ -33,8 +33,8 @@
 #define OTA_PORTNUM							443
 #define OTA_VERSION							"v1"
 
-#define OTA_POLL_STARTUP_DELAY_MS			5 * 1000
-#define OTA_POLL_PERIOD_MS					10 * 1000
+#define OTA_POLL_STARTUP_DELAY_MS			1 * 60 * 1000
+#define OTA_POLL_PERIOD_MS					5 * 60 * 1000
 #define INTERBLOCK_DELAY_MS					0
 
 #define UUID_LEN_BYTES						36
