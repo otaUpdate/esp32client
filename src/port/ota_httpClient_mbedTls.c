@@ -230,6 +230,7 @@ void ota_httpClient_closeConnection(void)
 	mbedtls_ssl_close_notify(&ssl);
 	mbedtls_ssl_session_reset(&ssl);
 	mbedtls_net_free(&server_fd);
+//	mbedtls_ssl_free(&ssl);
 
 	isOpen = false;
 }
@@ -253,8 +254,7 @@ static bool openConnection(void)
 	if( (tmpRet = mbedtls_net_connect(&server_fd, hostname, portNum_str, MBEDTLS_NET_PROTO_TCP)) != 0 )
 	{
 		OTA_LOG_ERROR(TAG, "mbedtls_net_connect returned %s0x%x", tmpRet<0?"-":"", tmpRet<0?-(unsigned)tmpRet:tmpRet);
-		mbedtls_ssl_session_reset(&ssl);
-		mbedtls_net_free(&server_fd);
+		ota_httpClient_closeConnection();
 		return false;
 	}
 
@@ -265,7 +265,7 @@ static bool openConnection(void)
 	{
 		if( (tmpRet != MBEDTLS_ERR_SSL_WANT_READ) && (tmpRet != MBEDTLS_ERR_SSL_WANT_WRITE) )
 		{
-			OTA_LOG_ERROR(TAG, "mbedtls_ssl_handshake returned %s0x%x", tmpRet<0?"-":"", tmpRet<0?-(unsigned)tmpRet:tmpRet);
+			OTA_LOG_ERROR(TAG, "mbedtls_ssl_handshake returned %s0x%x  %d", tmpRet<0?"-":"", tmpRet<0?-(unsigned)tmpRet:tmpRet, tmpRet);
 			ota_httpClient_closeConnection();
 			return false;
 		}
