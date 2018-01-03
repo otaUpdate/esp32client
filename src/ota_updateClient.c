@@ -16,9 +16,11 @@
 #include "ota_updateClient.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "ota_cert_ca.h"
 #include "ota_flash.h"
@@ -49,17 +51,17 @@
 
 
 // ******** local type definitions ********
-typedef struct
+typedef enum
 {
-	ota_updateClient_updateAvailableCb_t cb_updateAvailable;
-	ota_updateClient_willUpdateCb_t cb_willUpdate;
-	void* userVar;
-}listenerEntry_t;
+	CHECK_FOR_UPDATE_RETVAL_UP_TO_DATE,
+	CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE,
+	CHECK_FOR_UPDATE_RETVAL_ERROR
+}checkForUpdateRetVal_t;
 
 
 // ******** local function prototypes ********
 static void mainThread(void);
-static bool isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut);
+static checkForUpdateRetVal_t isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut);
 static void downloadUpdateWithUuid(char *targetUuidIn, size_t fwSize_bytesIn);
 
 
@@ -67,15 +69,17 @@ static void downloadUpdateWithUuid(char *targetUuidIn, size_t fwSize_bytesIn);
 static char fwUuid[UUID_LEN_BYTES+1];
 static char devSerialNum[SERIALNUM_MAXLEN_BYTES+1];
 
-static listenerEntry_t listeners[OTA_UPDATECLIENT_MAXNUM_CBS];
-static size_t numListeners = 0;
+static ota_updateClient_canCheckForUpdateCb_t cb_canCheckForUpdate = NULL;
+static ota_updateClient_updateCheckCompleteCb_t cb_updateCheckComplete = NULL;
+static void* userVar = NULL;
 
 static ota_updateClient_loggingFunction_t logFunction = NULL;
 static void* logFunction_userVar = NULL;
 
 
 // ******** global function implementations ********
-bool ota_updateClient_init(const char *const fwUuidIn, const char *const devSerialNumIn)
+bool ota_updateClient_init(const char *const fwUuidIn,
+						   const char *const devSerialNumIn)
 {
 	// ensure we have our needed parameters
 	if( fwUuidIn == NULL ) return false;
@@ -100,18 +104,13 @@ void ota_updateClient_setLogFunction(ota_updateClient_loggingFunction_t loggingF
 }
 
 
-bool ota_updateClient_addListener(ota_updateClient_updateAvailableCb_t cb_updateAvailableIn,
-								  ota_updateClient_willUpdateCb_t cb_willUpdateIn,
-								  void* userVarIn)
+void ota_updateClient_setStandoffManagementCbs(ota_updateClient_canCheckForUpdateCb_t cb_canCheckForUpdateIn,
+						   ota_updateClient_updateCheckCompleteCb_t cb_updateCheckCompleteIn,
+						   void *const userVarIn)
 {
-	if( numListeners >= (sizeof(listeners)/sizeof(*listeners)) ) return false;
-
-	listeners[numListeners].cb_updateAvailable = cb_updateAvailableIn;
-	listeners[numListeners].cb_willUpdate = cb_willUpdateIn;
-	listeners[numListeners].userVar = userVarIn;
-	numListeners++;
-
-	return true;
+	cb_canCheckForUpdate = cb_canCheckForUpdateIn;
+	cb_updateCheckComplete = cb_updateCheckCompleteIn;
+	userVar = userVarIn;
 }
 
 
@@ -142,26 +141,48 @@ static void mainThread(void)
 		// wait for the next polling period
 		OTA_LOG_DEBUG(TAG, "next update check in %d seconds", OTA_POLL_PERIOD_MS/1000);
 		ota_thread_delay_ms(OTA_POLL_PERIOD_MS);
+
+		// our polling period has elapsed...see if we can check for updates...
+		bool canCheckForUpdate = true;
+		if( cb_canCheckForUpdate != NULL ) canCheckForUpdate = cb_canCheckForUpdate(userVar);
+		if( !canCheckForUpdate )
+		{
+			OTA_LOG_DEBUG(TAG, "user declined to check for updates this polling period");
+			if( cb_updateCheckComplete != NULL) cb_updateCheckComplete(true, NULL, userVar);
+			continue;
+		}
 		OTA_LOG_INFO(TAG, "checking for updates now");
 
+		// check for an update
 		char targetUuid[UUID_LEN_BYTES+1];
 		size_t firmwareSize_bytes;
-		if( isUpdateAvailable(targetUuid, &firmwareSize_bytes) )
+		checkForUpdateRetVal_t updateRetVal = isUpdateAvailable(targetUuid, &firmwareSize_bytes);
+
+		// print some brief information
+		if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE )
 		{
 			OTA_LOG_INFO(TAG, "new FW available: '%s'", targetUuid);
-			downloadUpdateWithUuid(targetUuid, firmwareSize_bytes);
 		}
-		else
+		else if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UP_TO_DATE )
 		{
 			OTA_LOG_INFO(TAG, "FW up-to-date");
+		}
+
+		// let the user know we're either done checking or beginning an update
+		if( cb_updateCheckComplete != NULL ) cb_updateCheckComplete((updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE), targetUuid, userVar);
+
+		// begin our update (if applicable)
+		if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE )
+		{
+			downloadUpdateWithUuid(targetUuid, firmwareSize_bytes);
 		}
 	}
 }
 
 
-static bool isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut)
+static checkForUpdateRetVal_t isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut)
 {
-	if( (updateUuidOut == NULL) || (fwSize_bytesOut == NULL) ) return false;
+	if( (updateUuidOut == NULL) || (fwSize_bytesOut == NULL) ) return CHECK_FOR_UPDATE_RETVAL_ERROR;
 
 	// create our check-in request body...
 	char body[128];
@@ -174,15 +195,15 @@ static bool isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut
 	char responseBody[UUID_LEN_BYTES+1+FWSIZESTR_MAXLEN_BYTES+1];		// +1 for separating space, +1 for null-term
 	if( !ota_httpClient_postJson("/" OTA_VERSION "/devs/checkforupdate", body, &httpStatus, responseBody, sizeof(responseBody), &responseLen_bytes, false) )
 	{
-		OTA_LOG_WARN(TAG, "update check failed, will retry");
-		return false;
+		OTA_LOG_WARN(TAG, "update check failed, will retry later");
+		return CHECK_FOR_UPDATE_RETVAL_ERROR;
 	}
 
 	// if we made it here, we got a valid HTTP response...verify it
 	if( httpStatus != 200 )
 	{
-		OTA_LOG_WARN(TAG, "HTTP request did not return 200(OK) [%d], will retry", httpStatus);
-		return false;
+		OTA_LOG_WARN(TAG, "HTTP request did not return 200(OK) [%d], will retry later", httpStatus);
+		return CHECK_FOR_UPDATE_RETVAL_ERROR;
 	}
 
 	// if we made it here, update check was successful, see if we have an update
@@ -198,24 +219,19 @@ static bool isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut
 		if( *endPtr != '\0' )
 		{
 			OTA_LOG_WARN(TAG, "error parsing firmware length");
-			return false;
+			return CHECK_FOR_UPDATE_RETVAL_ERROR;
 		}
 
-		// notify our listeners
-		for( size_t i = 0; i < numListeners; i++ )
-		{
-			if( listeners[i].cb_updateAvailable != NULL ) listeners[i].cb_updateAvailable(responseBody, listeners[i].userVar);
-		}
-
-		return true;
+		return CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE;
 	}
 	else if( responseLen_bytes != 0 )
 	{
 		OTA_LOG_WARN(TAG, "got malformed response");
+		return CHECK_FOR_UPDATE_RETVAL_ERROR;
 	}
 
 	// if we made it here, no FW update
-	return false;
+	return CHECK_FOR_UPDATE_RETVAL_UP_TO_DATE;
 }
 
 
