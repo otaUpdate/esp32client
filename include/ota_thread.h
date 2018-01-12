@@ -26,12 +26,9 @@
 
 
 // ******** global type definitions *********
-typedef void (*ota_thread_cb_t)(void);
 
 
 // ******** global function prototypes *******
-void ota_thread_startThreadWithCallback(ota_thread_cb_t cbIn);
-
 void ota_thread_delay_ms(uint32_t delay_msIn);
 
 #endif

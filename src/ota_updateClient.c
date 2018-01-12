@@ -28,6 +28,7 @@
 #include "ota_logging.h"
 #include "ota_misc.h"
 #include "ota_thread.h"
+#include "ota_timeBase.h"
 
 
 // ******** local macro definitions ********
@@ -35,8 +36,8 @@
 #define OTA_PORTNUM							443
 #define OTA_VERSION							"v1"
 
-#define OTA_POLL_STARTUP_DELAY_MS			1 * 60 * 1000
-#define OTA_POLL_PERIOD_MS					5 * 60 * 1000
+//#define OTA_POLL_PERIOD_MS					5 * 60 * 1000
+#define OTA_POLL_PERIOD_MS					30 * 1000
 #define INTERBLOCK_DELAY_MS					0
 
 #define UUID_LEN_BYTES						36
@@ -60,7 +61,6 @@ typedef enum
 
 
 // ******** local function prototypes ********
-static void mainThread(void);
 static checkForUpdateRetVal_t isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut);
 static void downloadUpdateWithUuid(char *targetUuidIn, size_t fwSize_bytesIn);
 
@@ -69,12 +69,12 @@ static void downloadUpdateWithUuid(char *targetUuidIn, size_t fwSize_bytesIn);
 static char fwUuid[UUID_LEN_BYTES+1];
 static char devSerialNum[SERIALNUM_MAXLEN_BYTES+1];
 
-static ota_updateClient_canCheckForUpdateCb_t cb_canCheckForUpdate = NULL;
-static ota_updateClient_updateCheckCompleteCb_t cb_updateCheckComplete = NULL;
-static void* userVar = NULL;
+static bool isHttpClientInit = false;
 
 static ota_updateClient_loggingFunction_t logFunction = NULL;
 static void* logFunction_userVar = NULL;
+
+static uint32_t lastCheckTime_us = 0;
 
 
 // ******** global function implementations ********
@@ -89,11 +89,56 @@ bool ota_updateClient_init(const char *const fwUuidIn,
 	if( !ota_copyStringToBufferSafely(fwUuidIn, fwUuid, sizeof(fwUuid)) ) return false;
 	if( !ota_copyStringToBufferSafely(devSerialNumIn, devSerialNum, sizeof(devSerialNum)) ) return false;
 
-	// schedule our thread
-	ota_thread_startThreadWithCallback(mainThread);
+	// get our start time
+	lastCheckTime_us = ota_timeBase_getCount_us();
 
 	// if we made it here, we were successful
 	return true;
+}
+
+
+void ota_updateClient_iterate(void)
+{
+	uint32_t currTime_us = ota_timeBase_getCount_us();
+	if( ((currTime_us - lastCheckTime_us) / 1000) < OTA_POLL_PERIOD_MS )
+	{
+		return;
+	}
+	lastCheckTime_us = currTime_us;
+
+	// make sure out http client is initialized
+	if( !isHttpClientInit )
+	{
+		// initialize our http client
+		if( !ota_httpClient_init(OTA_HOSTNAME, OTA_PORTNUM, (const unsigned char*)OTA_CA_CERT, sizeof(OTA_CA_CERT)) )
+		{
+			OTA_LOG_ERROR(TAG, "error initializing http client, will retry next polling period");
+			return;
+		}
+		isHttpClientInit = true;
+	}
+
+	// now we're free to check
+	OTA_LOG_INFO(TAG, "checking for updates now");
+	char targetUuid[UUID_LEN_BYTES+1];
+	size_t firmwareSize_bytes;
+	checkForUpdateRetVal_t updateRetVal = isUpdateAvailable(targetUuid, &firmwareSize_bytes);
+
+	// print some brief information
+	if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE )
+	{
+		OTA_LOG_INFO(TAG, "new FW available: '%s'", targetUuid);
+	}
+	else if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UP_TO_DATE )
+	{
+		OTA_LOG_INFO(TAG, "FW up-to-date");
+	}
+
+	// begin our update (if applicable)
+	if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE )
+	{
+		downloadUpdateWithUuid(targetUuid, firmwareSize_bytes);
+	}
 }
 
 
@@ -101,16 +146,6 @@ void ota_updateClient_setLogFunction(ota_updateClient_loggingFunction_t loggingF
 {
 	logFunction = loggingFunctionIn;
 	logFunction_userVar = userVarIn;
-}
-
-
-void ota_updateClient_setStandoffManagementCbs(ota_updateClient_canCheckForUpdateCb_t cb_canCheckForUpdateIn,
-						   ota_updateClient_updateCheckCompleteCb_t cb_updateCheckCompleteIn,
-						   void *const userVarIn)
-{
-	cb_canCheckForUpdate = cb_canCheckForUpdateIn;
-	cb_updateCheckComplete = cb_updateCheckCompleteIn;
-	userVar = userVarIn;
 }
 
 
@@ -127,59 +162,6 @@ void ota_updateClient_log(int otaLogLevelIn, const char *const tagIn, const char
 
 
 // ******** local function implementations ********
-static void mainThread(void)
-{
-	ota_thread_delay_ms(OTA_POLL_STARTUP_DELAY_MS);
-	OTA_LOG_INFO(TAG, "current FW UUID: %s", fwUuid);
-	ota_flash_printPartitionInfo();
-
-	// initialize our http client
-	if( !ota_httpClient_init(OTA_HOSTNAME, OTA_PORTNUM, (const unsigned char*)OTA_CA_CERT, sizeof(OTA_CA_CERT)) ) return;
-
-	while(1)
-	{
-		// wait for the next polling period
-		OTA_LOG_DEBUG(TAG, "next update check in %d seconds", OTA_POLL_PERIOD_MS/1000);
-		ota_thread_delay_ms(OTA_POLL_PERIOD_MS);
-
-		// our polling period has elapsed...see if we can check for updates...
-		bool canCheckForUpdate = true;
-		if( cb_canCheckForUpdate != NULL ) canCheckForUpdate = cb_canCheckForUpdate(userVar);
-		if( !canCheckForUpdate )
-		{
-			OTA_LOG_DEBUG(TAG, "user declined to check for updates this polling period");
-			if( cb_updateCheckComplete != NULL) cb_updateCheckComplete(true, NULL, userVar);
-			continue;
-		}
-		OTA_LOG_INFO(TAG, "checking for updates now");
-
-		// check for an update
-		char targetUuid[UUID_LEN_BYTES+1];
-		size_t firmwareSize_bytes;
-		checkForUpdateRetVal_t updateRetVal = isUpdateAvailable(targetUuid, &firmwareSize_bytes);
-
-		// print some brief information
-		if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE )
-		{
-			OTA_LOG_INFO(TAG, "new FW available: '%s'", targetUuid);
-		}
-		else if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UP_TO_DATE )
-		{
-			OTA_LOG_INFO(TAG, "FW up-to-date");
-		}
-
-		// let the user know we're either done checking or beginning an update
-		if( cb_updateCheckComplete != NULL ) cb_updateCheckComplete((updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE), targetUuid, userVar);
-
-		// begin our update (if applicable)
-		if( updateRetVal == CHECK_FOR_UPDATE_RETVAL_UPDATE_AVAILABLE )
-		{
-			downloadUpdateWithUuid(targetUuid, firmwareSize_bytes);
-		}
-	}
-}
-
-
 static checkForUpdateRetVal_t isUpdateAvailable(char* updateUuidOut, size_t *const fwSize_bytesOut)
 {
 	if( (updateUuidOut == NULL) || (fwSize_bytesOut == NULL) ) return CHECK_FOR_UPDATE_RETVAL_ERROR;
@@ -307,7 +289,7 @@ static void downloadUpdateWithUuid(char *targetUuidIn, size_t fwSize_bytesIn)
 		}
 
 		// give us a bit of a delay between blocks so we don't cause much damage to other processes
-		if( INTERBLOCK_DELAY_MS >0 ) ota_thread_delay_ms(INTERBLOCK_DELAY_MS);
+		if( INTERBLOCK_DELAY_MS > 0 ) ota_thread_delay_ms(INTERBLOCK_DELAY_MS);
 	}
 
 	// if we get to here, we're done receiving blocks

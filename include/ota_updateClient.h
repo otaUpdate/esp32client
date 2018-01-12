@@ -29,19 +29,15 @@
 // ******** global type definitions *********
 typedef void (*ota_updateClient_loggingFunction_t)(void *userVarIn, int otaLogLevelIn, const char *const tagIn, const char *const fmtIn, va_list argsIn);
 
-typedef bool (*ota_updateClient_canCheckForUpdateCb_t)(void *const userVarIn);
-typedef void (*ota_updateClient_updateCheckCompleteCb_t)(bool updateAvailableIn, const char *const updateUuidIn, void *const userVarIn);
-
 
 // ******** global function prototypes ********
 bool ota_updateClient_init(const char *const fwUuidIn,
 						   const char *const devSerialNumIn);
 
+void ota_updateClient_iterate(void);
+
 void ota_updateClient_setLogFunction(ota_updateClient_loggingFunction_t loggingFunctionIn, void *userVarIn);
 
-void ota_updateClient_setStandoffManagementCbs(ota_updateClient_canCheckForUpdateCb_t cb_canCheckForUpdateIn,
-											  ota_updateClient_updateCheckCompleteCb_t cb_updateCheckCompleteIn,
-											  void *const userVarIn);
 
 /**
  * @protected

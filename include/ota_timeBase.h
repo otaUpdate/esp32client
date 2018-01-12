@@ -1,4 +1,5 @@
 /**
+ * @file
  * @copyright 2017 otaUpdate.net
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,31 +14,21 @@
  *
  * @author Christopher Armenio
  */
-#include "ota_thread.h"
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/portmacro.h"
+#ifndef OTA_UPDATECLIENT_TIMEBASE_H_
+#define OTA_UPDATECLIENT_TIMEBASE_H_
 
 
-// ******** local macro definitions ********
+// ******** includes ********
+#include <stdint.h>
 
 
-// ******** local type definitions ********
+// ******** global macro definitions ********
 
 
-// ******** local function prototypes ********
+// ******** global type definitions *********
 
 
-// ********  local variable declarations *********
+// ******** global function prototypes ********
+uint32_t ota_timeBase_getCount_us(void);
 
-
-// ******** global function implementations ********
-void ota_thread_delay_ms(uint32_t delay_msIn)
-{
-	taskYIELD();
-	vTaskDelay(delay_msIn / portTICK_PERIOD_MS);
-}
-
-
-// ******** local function implementations ********
+#endif
