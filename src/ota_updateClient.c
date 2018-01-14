@@ -88,8 +88,8 @@ bool ota_updateClient_init(const char *const fwUuidIn,
 	if( !ota_copyStringToBufferSafely(fwUuidIn, fwUuid, sizeof(fwUuid)) ) return false;
 	if( !ota_copyStringToBufferSafely(devSerialNumIn, devSerialNum, sizeof(devSerialNum)) ) return false;
 
-	// get our start time
-	lastCheckTime_us = ota_timeBase_getCount_us();
+	// set our start time so we _always_ check for updates on first call of _iterate
+	lastCheckTime_us = ota_timeBase_getCount_us() - (OTA_POLL_PERIOD_MS * 1000);
 
 	// if we made it here, we were successful
 	return true;
