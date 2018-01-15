@@ -16,9 +16,7 @@
 #include "ota_timeBase.h"
 
 
-#include <math.h>
-#include <stdbool.h>
-#include <sys/time.h>
+#include <esp_timer.h>
 
 
 // ******** local macro definitions ********
@@ -31,35 +29,12 @@
 
 
 // ********  local variable declarations *********
-static bool hasInitVal = false;
-static struct timeval initVal = {0, 0};
 
 
 // ******** global function implementations ********
 uint32_t ota_timeBase_getCount_us(void)
 {
-	if( !hasInitVal )
-	{
-		gettimeofday(&initVal, NULL);
-		hasInitVal = true;
-	}
-
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-
-	// now subtract to compare
-	struct timeval diff;
-
-	if( initVal.tv_usec > tv.tv_usec )
-	{
-		tv.tv_sec--;
-		tv.tv_usec += 1E6;
-	}
-
-	diff.tv_sec = tv.tv_sec - initVal.tv_sec;
-	diff.tv_usec = tv.tv_usec - initVal.tv_usec;
-
-	return fmod((diff.tv_sec * 1E6 + diff.tv_usec), UINT32_MAX);
+	return esp_timer_get_time() % UINT32_MAX;
 }
 
 
